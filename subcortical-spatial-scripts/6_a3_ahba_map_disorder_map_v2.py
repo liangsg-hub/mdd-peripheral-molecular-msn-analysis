@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Left-hemisphere subcortical spatial correspondence between AHBA-derived SRPK1 expression and the MDD-HC MSN disorder map using BrainSMASH nulls."""
 import warnings
 warnings.filterwarnings("ignore")
 

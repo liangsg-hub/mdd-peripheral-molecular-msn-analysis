@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Bilateral subcortical spatial correspondence between the MDD-HC MSN disorder map and miR-139-5p-associated MSN maps using BrainSMASH nulls."""
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -36,24 +34,31 @@ dist_file = TIAN_S4_DISTANCE_MATRIX
 
 # =========================
 # y maps to test
-# y = miR-139-5p subcortical maps
+# y = peripheral SRPK1 subcortical maps
+#
+# In the updated R workflow, srpk1_imaging_map_main.csv is the
+# Batch-adjusted primary map:
+#   MSN ~ SRPK1 + Batch + age + sex + EDL + eTIV
+# The remaining maps are sensitivity models that also retain Batch.
 # =========================
-img_dir = OUTPUT_ROOT / "mir1395p_msn_subcort_assoc"
+img_dir = OUTPUT_ROOT / "srpk1_msn_subcort_assoc_v2"
 
 img_files = {
-    "main": img_dir / "mir1395p_imaging_map_main.csv",
-    "plus_med_history": img_dir / "mir1395p_imaging_map_plus_med_history.csv",
+    "batch_main": img_dir / "srpk1_imaging_map_main.csv",
+    "batch_plus_med_history": img_dir / "srpk1_imaging_map_plus_med_history.csv",
+    "batch_plus_neutrophils": img_dir / "srpk1_imaging_map_plus_neutrophils.csv",
+    "batch_plus_med_history_neutrophils": img_dir / "srpk1_imaging_map_plus_med_history_neutrophils.csv",
 }
 
 # =========================
 # output
 # =========================
-out_dir = OUTPUT_ROOT / "a1_sub_disease_vs_mir1395p_batch"
+out_dir = OUTPUT_ROOT / "a2_sub_disease_vs_srpk1_main"
 out_dir.mkdir(parents=True, exist_ok=True)
 
-null_file = out_dir / "a1_sub_nulls_x_mdd_vs_hc_tmap_tian_s4.npy"
-meta_file = out_dir / "a1_sub_null_meta.json"
-result_file = out_dir / "a1_sub_batch_results.csv"
+null_file = out_dir / "a2_sub_nulls_x_mdd_vs_hc_tmap_tian_s4.npy"
+meta_file = out_dir / "a2_sub_null_meta.json"
+result_file = out_dir / "a2_sub_disease_vs_srpk1_main_results.csv"
 
 # =========================
 # settings
@@ -71,11 +76,13 @@ disease_df["ROI"] = disease_df["ROI"].astype(str).str.strip()
 dist_df.index = dist_df.index.astype(str).str.strip()
 dist_df.columns = dist_df.columns.astype(str).str.strip()
 
+# x = disease t-map
 if "t_group_MDD" not in disease_df.columns:
     raise ValueError("'t_group_MDD' column not found in disease_file")
 
 x_df = disease_df[["ROI", "t_group_MDD"]].rename(columns={"t_group_MDD": "disease_t"}).dropna().copy()
 
+# check ROI set against distance matrix
 roi_x_set = set(x_df["ROI"])
 roi_d_set = set(dist_df.index)
 
@@ -130,6 +137,13 @@ meta = {
     "disease_file": str(disease_file),
     "dist_file": str(dist_file),
     "x_map": "MDD_vs_HC_subcortical_tmap",
+    "y_map_family": "Peripheral_SRPK1_subcortical_MSN_tmaps",
+    "primary_y_model": "batch_main: MSN ~ SRPK1 + Batch + age + sex + EDL + eTIV",
+    "sensitivity_y_models": [
+        "batch_plus_med_history",
+        "batch_plus_neutrophils",
+        "batch_plus_med_history_neutrophils"
+    ],
     "n_roi": int(len(x)),
     "shared_null_file": str(null_file.name),
     "img_files": {k: str(v) for k, v in img_files.items()}
@@ -138,7 +152,7 @@ with open(meta_file, "w") as f:
     json.dump(meta, f, indent=2)
 
 # =========================
-# run all A1-sub models
+# run all A2-sub models
 # =========================
 all_results = []
 
@@ -153,13 +167,7 @@ for model_name, img_file in img_files.items():
     if "t" not in img_df.columns:
         raise ValueError(f"'t' column not found in {img_file}")
 
-    # beta may be absent in some exports, so handle safely
-    keep_cols = ["ROI", "t"]
-    for col in ["beta", "p", "p_fdr", "N", "se"]:
-        if col in img_df.columns:
-            keep_cols.append(col)
-
-    y_df = img_df[keep_cols].copy()
+    y_df = img_df[["ROI", "t", "beta", "p", "p_fdr"]].copy()
     y_df = y_df.rename(columns={"t": "img_t"})
 
     # merge with fixed x
@@ -177,16 +185,16 @@ for model_name, img_file in img_files.items():
     y = df["img_t"].to_numpy(dtype=float)
 
     # save merged input
-    merged_file = out_dir / f"a1_sub_input_merged_{model_name}.csv"
-    vectors_file = out_dir / f"a1_sub_ordered_vectors_{model_name}.csv"
-    null_corr_file = out_dir / f"a1_sub_null_distribution_{model_name}.csv"
+    merged_file = out_dir / f"a2_sub_input_merged_{model_name}.csv"
+    vectors_file = out_dir / f"a2_sub_ordered_vectors_{model_name}.csv"
+    null_corr_file = out_dir / f"a2_sub_null_distribution_{model_name}.csv"
 
     df.to_csv(merged_file, index=False)
 
     pd.DataFrame({
         "ROI": roi_order,
         "disease_t": x,
-        "mir1395p_t": y
+        "img_t": y
     }).to_csv(vectors_file, index=False)
 
     # observed correlations
@@ -208,6 +216,7 @@ for model_name, img_file in img_files.items():
     print(f"Spatial-null p = {p_spatial:.6f}")
 
     all_results.append({
+        "comparison": f"disorder_tmap_vs_periph_SRPK1_subcort_tmap_{model_name}",
         "model": model_name,
         "img_file": str(img_file),
         "n_roi": len(df),
