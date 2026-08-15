@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Left-hemisphere subcortical spatial correspondence between AHBA-derived SRPK1 expression and the MDD-HC MSN disorder map using BrainSMASH nulls."""
 import warnings
-import os
 warnings.filterwarnings("ignore")
 
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -12,26 +12,26 @@ from scipy.stats import pearsonr, spearmanr
 from brainsmash.mapgen.base import Base
 
 # =========================
-# Portable project paths
+# user configuration
 # =========================
-# Set MSN_PROJECT_ROOT to the folder that contains the input data.
-# Example:
-#   export MSN_PROJECT_ROOT=/path/to/msn_2026
-# Optional: set TIAN_S4_DISTANCE_MATRIX if the distance matrix is stored elsewhere.
-# Optional: set MSN_OUTPUT_ROOT to redirect generated outputs.
-PROJECT_ROOT = Path(os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_2026")).expanduser()
-OUTPUT_ROOT = Path(os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")).expanduser()
+PROJECT_ROOT = Path(
+    os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_project")
+).expanduser()
+OUTPUT_ROOT = Path(
+    os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")
+).expanduser()
 TIAN_S4_DISTANCE_MATRIX = Path(
-    os.environ.get("TIAN_S4_DISTANCE_MATRIX", PROJECT_ROOT / "tian_s4_distance_matrix.csv")
+    os.environ.get(
+        "TIAN_S4_DISTANCE_MATRIX",
+        PROJECT_ROOT / "tian_s4_distance_matrix.csv",
+    )
 ).expanduser()
 
-
-
 # =========================
-# Input paths
+# paths
 # =========================
-expr_file = PROJECT_ROOT / "ahba_tian_subcortex_srpk1" / "tian_subcortex_SRPK1_main_named.csv"
-disease_file = PROJECT_ROOT / "msn_results_subcort" / "tmap_mdd_vs_hc_covs_subcort.csv"
+expr_file = PROJECT_ROOT / "ahba_tian_subcortex_srpk1/tian_subcortex_SRPK1_main_named.csv"
+disease_file = OUTPUT_ROOT / "tmap_mdd_vs_hc_covs_subcort.csv"
 dist_file = TIAN_S4_DISTANCE_MATRIX
 
 out_dir = OUTPUT_ROOT / "a3_sub_ahba_srpk1_expr_vs_disease_tmap_lh"
@@ -41,13 +41,13 @@ out_merged = out_dir / "a3_sub_input_merged_lh_v2.csv"
 out_vectors = out_dir / "a3_sub_ordered_vectors_lh_v2.csv"
 out_null = out_dir / "a3_sub_null_distribution_lh_v2.csv"
 out_result = out_dir / "a3_sub_result_lh_v2.csv"
-null_file = out_dir / "a3_sub_nulls_x_ahba_srpk1_expr_tian_s4_lh_v2.npy"
+null_file = out_dir / "a3_sub_nulls_x_mdd_vs_hc_tmap_tian_s4_lh_v3.npy"
 meta_file = out_dir / "a3_sub_null_meta_lh_v2.json"
 roi_order_check_file = out_dir / "a3_tian_s4_lh_roi_order_check_v2.csv"
 
 
 # =========================
-# Analysis settings
+# settings
 # =========================
 n_perm = 10000
 seed = 1234
@@ -61,7 +61,7 @@ hemisphere_to_use = "left"
 
 
 # =========================
-# Helper functions
+# helpers
 # =========================
 def check_file(path, label):
     if not path.exists():
@@ -258,8 +258,8 @@ D = dist_lh.to_numpy(dtype=float)
 if D.shape != (expected_hemi_n_roi, expected_hemi_n_roi):
     raise ValueError(f"Expected LH distance matrix shape (27, 27), got {D.shape}.")
 
-x = df["ahba_srpk1_expr"].to_numpy(dtype=float)
-y = df["disease_tmap"].to_numpy(dtype=float)
+x = df["disease_tmap"].to_numpy(dtype=float)
+y = df["ahba_srpk1_expr"].to_numpy(dtype=float)
 
 # save merged and ordered vectors
 df.to_csv(out_merged, index=False)
@@ -320,7 +320,7 @@ pd.DataFrame({"null_r": null_r}).to_csv(out_null, index=False)
 # summary result
 # =========================
 result_df = pd.DataFrame([{
-    "comparison": "a3_sub_ahba_srpk1_expr_lh_vs_mdd_vs_hc_sub_tmap_lh",
+    "comparison": "a3_sub_mdd_vs_hc_tmap_lh_vs_ahba_srpk1_expr_lh",
     "atlas": "Tian_S4_subcortex",
     "hemisphere": hemisphere_to_use,
     "n_roi": len(df),
@@ -357,13 +357,13 @@ meta = {
     "expr_file": str(expr_file),
     "disease_file": str(disease_file),
     "dist_file": str(dist_file),
-    "map_x": "AHBA_SRPK1_expression_left_subcortex",
-    "map_y": "MDD_vs_HC_subcortical_tmap_left_subcortex",
+    "map_x": "MDD_vs_HC_subcortical_tmap_left_subcortex",
+    "map_y": "AHBA_SRPK1_expression_left_subcortex",
     "n_roi_used": int(len(x)),
     "roi_order_check_file": str(roi_order_check_file.name),
     "ordered_vector_file": str(out_vectors.name),
     "null_file": str(null_file.name),
-    "note": "BrainSMASH surrogate maps were generated from the LH AHBA SRPK1 expression vector and the LH 27 x 27 Tian S4 subcortical distance matrix."
+    "note": "BrainSMASH surrogate maps were generated from the left-subcortical MDD–HC MSN t map using the 27 × 27 Tian S4 left-subcortical distance matrix."
 }
 
 with open(meta_file, "w") as f:

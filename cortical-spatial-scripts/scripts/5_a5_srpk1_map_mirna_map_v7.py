@@ -1,0 +1,1272 @@
+#!/usr/bin/env python3
+"""
+Compare miR-139-5p-associated bilateral cortical MSN t maps with peripheral
+SRPK1-associated bilateral cortical MSN t maps using Map 1-specific
+Burt2020 spatial null maps.
+
+Map 1 = miR-139-5p-associated cortical MSN t map
+Map 2 = peripheral SRPK1-associated cortical MSN t map
+
+Two miRNA Map 1 models and four SRPK1 Map 2 models are combined into a
+complete 2 x 4 comparison matrix.
+
+Set MSN_PROJECT_ROOT to the project data directory before running.
+Set DK308_PARCELLATION if the bilateral DK-308 parcellation is not stored
+at the default path.
+"""
+
+import warnings
+warnings.filterwarnings("ignore")
+
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+
+import nibabel as nib
+import numpy as np
+import pandas as pd
+from scipy.stats import zscore
+from neuromaps import nulls as neuromaps_nulls
+from neuromaps import stats
+
+
+# =========================
+# user configuration
+# =========================
+# Example:
+#   export MSN_PROJECT_ROOT=/path/to/msn_project
+#   export DK308_PARCELLATION=/path/to/dk308_parcellation_2mm.nii.gz
+# Optional:
+#   export BURT_N_PROC=4
+PROJECT_ROOT = Path(
+    os.environ.get(
+        "MSN_PROJECT_ROOT",
+        "/path/to/msn_project",
+    )
+).expanduser()
+
+DK308_PARCELLATION = Path(
+    os.environ.get(
+        "DK308_PARCELLATION",
+        PROJECT_ROOT / "dk308_parcellation_2mm.nii.gz",
+    )
+).expanduser()
+
+
+# =========================
+# input paths
+# =========================
+mirna_dir = (
+    PROJECT_ROOT
+    / "msn_results_cort"
+    / "mir1395p_msn_assoc"
+)
+srpk1_dir = (
+    PROJECT_ROOT
+    / "msn_results_cort"
+    / "srpk1_msn_assoc_v2"
+)
+
+# Map 1 models
+mirna_maps = {
+    "main": (
+        mirna_dir / "mir1395p_imaging_map_main.csv"
+    ),
+    "plus_med_history": (
+        mirna_dir / "mir1395p_imaging_map_plus_med_history.csv"
+    ),
+}
+
+# Map 2 models
+srpk1_maps = {
+    "batch_main": (
+        srpk1_dir / "srpk1_imaging_map_main.csv"
+    ),
+    "batch_plus_med_history": (
+        srpk1_dir / "srpk1_imaging_map_plus_med_history.csv"
+    ),
+    "batch_plus_neutrophils": (
+        srpk1_dir / "srpk1_imaging_map_plus_neutrophils.csv"
+    ),
+    "batch_plus_med_history_neutrophils": (
+        srpk1_dir
+        / "srpk1_imaging_map_plus_med_history_neutrophils.csv"
+    ),
+}
+
+roi_order_file = PROJECT_ROOT / "dk308_roi_order.txt"
+
+
+# =========================
+# output paths
+# =========================
+out_dir = (
+    PROJECT_ROOT
+    / "msn_results_cort"
+    / "a5_mir1395p_vs_periph_srpk1_v7"
+)
+out_dir.mkdir(parents=True, exist_ok=True)
+
+merged_dir = out_dir / "input_merged"
+null_dist_dir = out_dir / "null_distributions"
+null_cache_dir = out_dir / "map1_burt_nulls"
+
+for directory in [
+    merged_dir,
+    null_dist_dir,
+    null_cache_dir,
+]:
+    directory.mkdir(parents=True, exist_ok=True)
+
+result_file = (
+    out_dir
+    / "a5_mir1395p_vs_srpk1_full_2x4_burt_results_v7.csv"
+)
+r_matrix_file = (
+    out_dir
+    / "a5_mir1395p_vs_srpk1_r_obs_matrix_2x4_v7.csv"
+)
+p_matrix_file = (
+    out_dir
+    / "a5_mir1395p_vs_srpk1_p_burt_matrix_2x4_v7.csv"
+)
+meta_file = (
+    out_dir
+    / "a5_mir1395p_vs_srpk1_full_2x4_meta_v7.json"
+)
+roi_order_check_file = (
+    out_dir / "a5_dk308_roi_order_check_v7.csv"
+)
+
+
+# =========================
+# settings
+# =========================
+roi_col = "ROI"
+t_col = "t"
+
+expected_n_roi = 308
+expected_n_lh = 152
+expected_n_rh = 156
+
+n_perm = 10000
+seed = 1234
+n_proc = int(os.environ.get("BURT_N_PROC", "1"))
+burt_atlas = "MNI152"
+burt_density = "2mm"
+use_zscore = False
+
+
+# =========================
+# helpers
+# =========================
+def check_file(path, label):
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{label} not found: {path}"
+        )
+
+
+def normalize_roi_name(x):
+    return (
+        str(x)
+        .strip()
+        .strip("'")
+        .strip('"')
+    )
+
+
+def read_roi_order(path):
+    check_file(
+        path,
+        "DK-308 ROI order file",
+    )
+
+    text = path.read_text(
+        encoding="utf-8",
+        errors="ignore",
+    )
+
+    names = re.findall(
+        r"'([^']+)'",
+        text,
+    )
+
+    if len(names) == 0:
+        names = []
+
+        for line in text.splitlines():
+            line = line.strip()
+
+            if (
+                line == ""
+                or line.lower() == "roi"
+            ):
+                continue
+
+            parts = [
+                p.strip()
+                for p in line.split(",")
+                if p.strip() != ""
+            ]
+            names.extend(parts)
+
+    names = [
+        normalize_roi_name(x)
+        for x in names
+        if normalize_roi_name(x) != ""
+    ]
+
+    if len(names) != expected_n_roi:
+        raise ValueError(
+            f"Expected {expected_n_roi} ROI names in "
+            f"ROI order file, got {len(names)}."
+        )
+
+    if len(set(names)) != expected_n_roi:
+        s = pd.Series(names)
+        dup = s[
+            s.duplicated()
+        ].tolist()
+
+        raise ValueError(
+            f"Duplicated ROI names in ROI order file: "
+            f"{dup[:20]}"
+        )
+
+    n_lh = sum(
+        x.startswith("lh_")
+        for x in names
+    )
+    n_rh = sum(
+        x.startswith("rh_")
+        for x in names
+    )
+    n_other = (
+        len(names)
+        - n_lh
+        - n_rh
+    )
+
+    if (
+        n_lh != expected_n_lh
+        or n_rh != expected_n_rh
+        or n_other != 0
+    ):
+        raise ValueError(
+            "Unexpected ROI order hemisphere counts: "
+            f"lh={n_lh}, rh={n_rh}, other={n_other}."
+        )
+
+    return names
+
+
+def prepare_map(
+    path,
+    value_name,
+    label,
+):
+    check_file(
+        path,
+        label,
+    )
+
+    df = pd.read_csv(path)
+    df.columns = [
+        str(x).strip()
+        for x in df.columns
+    ]
+
+    missing_cols = sorted(
+        set([roi_col, t_col])
+        - set(df.columns)
+    )
+
+    if missing_cols:
+        raise ValueError(
+            f"Missing columns in {label}: "
+            f"{missing_cols}"
+        )
+
+    df = df[
+        [roi_col, t_col]
+    ].rename(
+        columns={t_col: value_name}
+    ).copy()
+
+    df[roi_col] = df[roi_col].map(
+        normalize_roi_name
+    )
+    df[value_name] = pd.to_numeric(
+        df[value_name],
+        errors="coerce",
+    )
+
+    if len(df) != expected_n_roi:
+        raise ValueError(
+            f"Expected {expected_n_roi} rows in "
+            f"{label}, got {len(df)}."
+        )
+
+    if df[roi_col].duplicated().any():
+        dup = df.loc[
+            df[roi_col].duplicated(),
+            roi_col,
+        ].tolist()
+
+        raise ValueError(
+            f"Duplicated ROI in {label}: "
+            f"{dup[:20]}"
+        )
+
+    return df
+
+
+def align_map_to_order(
+    df,
+    value_name,
+    standard_roi_order,
+    label,
+):
+    standard_set = set(
+        standard_roi_order
+    )
+    input_set = set(
+        df[roi_col]
+    )
+
+    missing = [
+        x
+        for x in standard_roi_order
+        if x not in input_set
+    ]
+    extra = sorted(
+        input_set - standard_set
+    )
+
+    if missing:
+        raise ValueError(
+            f"ROI names missing in {label}: "
+            f"{missing[:30]}"
+        )
+
+    if extra:
+        raise ValueError(
+            f"Extra ROI names in {label}: "
+            f"{extra[:30]}"
+        )
+
+    lookup = pd.DataFrame({
+        roi_col: standard_roi_order,
+        "atlas_order": np.arange(
+            1,
+            expected_n_roi + 1,
+        ),
+        "hemisphere": [
+            (
+                "lh"
+                if x.startswith("lh_")
+                else "rh"
+            )
+            for x in standard_roi_order
+        ],
+    })
+
+    aligned = lookup.merge(
+        df[[roi_col, value_name]],
+        on=roi_col,
+        how="left",
+        validate="one_to_one",
+    )
+
+    if aligned[value_name].isna().any():
+        bad = aligned.loc[
+            aligned[value_name].isna(),
+            roi_col,
+        ].tolist()
+
+        raise ValueError(
+            f"Missing numeric values after alignment "
+            f"in {label}: {bad[:30]}"
+        )
+
+    n_lh = int(
+        (
+            aligned["hemisphere"] == "lh"
+        ).sum()
+    )
+    n_rh = int(
+        (
+            aligned["hemisphere"] == "rh"
+        ).sum()
+    )
+
+    if (
+        n_lh != expected_n_lh
+        or n_rh != expected_n_rh
+    ):
+        raise ValueError(
+            "Unexpected hemisphere counts after "
+            f"alignment in {label}: "
+            f"lh={n_lh}, rh={n_rh}."
+        )
+
+    return aligned
+
+
+def transform_map(x):
+    x = np.asarray(
+        x,
+        dtype=float,
+    )
+
+    if not use_zscore:
+        return x
+
+    x = zscore(
+        x,
+        nan_policy="omit",
+    )
+
+    return np.nan_to_num(
+        x,
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+
+
+def array_sha256(x):
+    arr = np.ascontiguousarray(
+        np.asarray(x)
+    )
+
+    h = hashlib.sha256()
+    h.update(
+        str(arr.shape).encode("utf-8")
+    )
+    h.update(
+        str(arr.dtype).encode("utf-8")
+    )
+    h.update(
+        arr.tobytes()
+    )
+
+    return h.hexdigest()
+
+
+def file_sha256(
+    path,
+    chunk_size=1024 * 1024,
+):
+    h = hashlib.sha256()
+
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+
+            if not chunk:
+                break
+
+            h.update(chunk)
+
+    return h.hexdigest()
+
+
+def check_dk308_parcellation(path):
+    check_file(
+        path,
+        "DK-308 MNI152 2 mm parcellation",
+    )
+
+    img = nib.load(str(path))
+    data = np.asanyarray(
+        img.dataobj
+    )
+    finite = data[
+        np.isfinite(data)
+    ]
+    labels = np.unique(finite)
+    labels = labels[
+        labels != 0
+    ]
+
+    if not np.allclose(
+        labels,
+        np.round(labels),
+    ):
+        raise ValueError(
+            "DK-308 parcellation contains "
+            "non-integer parcel labels."
+        )
+
+    labels = np.sort(
+        np.round(labels).astype(int)
+    )
+
+    if len(labels) != expected_n_roi:
+        raise ValueError(
+            f"Expected {expected_n_roi} nonzero parcel "
+            f"labels in DK-308 parcellation, "
+            f"got {len(labels)}."
+        )
+
+    expected_labels = np.arange(
+        1,
+        expected_n_roi + 1,
+    )
+
+    if not np.array_equal(
+        labels,
+        expected_labels,
+    ):
+        raise ValueError(
+            "DK-308 parcellation labels must be "
+            "consecutive integers 1-308 so that the "
+            "parcellated null-map order matches "
+            "dk308_roi_order.txt."
+        )
+
+    return labels
+
+
+def build_null_cache_signature(
+    map_1,
+    roi_order,
+    parcellation_file,
+    mirna_model_tag,
+):
+    return {
+        "map_1": (
+            "miR1395p_associated_"
+            "bilateral_cortical_MSN_tmap"
+        ),
+        "mirna_model_tag": mirna_model_tag,
+        "map1_vector_sha256": array_sha256(
+            map_1
+        ),
+        "roi_order_sha256": array_sha256(
+            np.asarray(
+                roi_order,
+                dtype="U",
+            )
+        ),
+        "parcellation_sha256": file_sha256(
+            parcellation_file
+        ),
+        "parcellation_file": str(
+            parcellation_file
+        ),
+        "atlas": burt_atlas,
+        "density": burt_density,
+        "n_perm": n_perm,
+        "seed": seed,
+        "n_proc": n_proc,
+        "use_zscore": use_zscore,
+        "expected_n_roi": expected_n_roi,
+        "spatial_domain": "bilateral_cortex",
+    }
+
+
+def generate_or_load_burt_nulls(
+    map_1,
+    roi_order,
+    mirna_model_tag,
+):
+    check_dk308_parcellation(
+        DK308_PARCELLATION
+    )
+
+    null_file = (
+        null_cache_dir
+        / (
+            "a5_nulls_x_mir1395p_"
+            f"{mirna_model_tag}_burt2020_"
+            "dk308_perm10000_v7.npy"
+        )
+    )
+    null_meta_file = (
+        null_cache_dir
+        / (
+            "a5_nulls_x_mir1395p_"
+            f"{mirna_model_tag}_burt2020_"
+            "dk308_perm10000_v7.json"
+        )
+    )
+
+    signature = build_null_cache_signature(
+        map_1,
+        roi_order,
+        DK308_PARCELLATION,
+        mirna_model_tag,
+    )
+
+    cache_is_valid = False
+
+    if (
+        null_file.exists()
+        and null_meta_file.exists()
+    ):
+        try:
+            with open(
+                null_meta_file,
+                "r",
+                encoding="utf-8",
+            ) as f:
+                cached_meta = json.load(f)
+
+            cache_is_valid = all(
+                cached_meta.get(key) == value
+                for key, value in signature.items()
+            )
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            cache_is_valid = False
+
+    if cache_is_valid:
+        print(
+            "Loading cached Map 1-specific Burt2020 "
+            f"nulls for miRNA model: {mirna_model_tag}"
+        )
+        null_maps = np.load(
+            null_file
+        )
+    else:
+        if (
+            null_file.exists()
+            or null_meta_file.exists()
+        ):
+            print(
+                "Cached Burt2020 nulls do not match "
+                "the current Map 1 or settings; "
+                f"regenerating for {mirna_model_tag}..."
+            )
+        else:
+            print(
+                "Generating Map 1-specific Burt2020 "
+                f"nulls for miRNA model: {mirna_model_tag}"
+            )
+
+        null_maps = neuromaps_nulls.burt2020(
+            data=map_1,
+            atlas=burt_atlas,
+            density=burt_density,
+            parcellation=str(
+                DK308_PARCELLATION
+            ),
+            n_perm=n_perm,
+            seed=seed,
+            n_proc=n_proc,
+        )
+
+        np.save(
+            null_file,
+            null_maps,
+        )
+
+        with open(
+            null_meta_file,
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                signature,
+                f,
+                indent=2,
+            )
+
+    print(
+        "Burt2020 null shape:",
+        null_maps.shape,
+    )
+
+    if null_maps.shape != (
+        expected_n_roi,
+        n_perm,
+    ):
+        raise ValueError(
+            "Expected Burt2020 null shape "
+            f"({expected_n_roi}, {n_perm}), "
+            f"got {null_maps.shape}."
+        )
+
+    if not np.isfinite(
+        null_maps
+    ).all():
+        raise ValueError(
+            "Burt2020 null array contains "
+            "NaN or infinite values."
+        )
+
+    return (
+        null_maps,
+        signature,
+        null_file,
+        null_meta_file,
+    )
+
+
+# =========================
+# read ROI order
+# =========================
+standard_roi_order = read_roi_order(
+    roi_order_file
+)
+
+roi_order_check = pd.DataFrame({
+    "atlas_order": np.arange(
+        1,
+        expected_n_roi + 1,
+    ),
+    "ROI": standard_roi_order,
+    "hemisphere": [
+        (
+            "lh"
+            if x.startswith("lh_")
+            else "rh"
+        )
+        for x in standard_roi_order
+    ],
+})
+roi_order_check.to_csv(
+    roi_order_check_file,
+    index=False,
+)
+
+
+# =========================
+# read and align all Map 2 SRPK1 maps once
+# =========================
+aligned_srpk1_maps = {}
+
+for (
+    srpk1_model_tag,
+    srpk1_map_file,
+) in srpk1_maps.items():
+    srpk1_df_raw = prepare_map(
+        srpk1_map_file,
+        "srpk1_t",
+        "peripheral SRPK1 map",
+    )
+
+    aligned_srpk1_maps[
+        srpk1_model_tag
+    ] = align_map_to_order(
+        srpk1_df_raw,
+        "srpk1_t",
+        standard_roi_order,
+        "peripheral SRPK1 map",
+    )
+
+
+# =========================
+# run complete 2 x 4 matrix
+# =========================
+all_results = []
+map_1_null_metadata = {}
+
+for (
+    mirna_model_tag,
+    mirna_map_file,
+) in mirna_maps.items():
+    print("\n========================================")
+    print(
+        "Map 1 miR-139-5p model:",
+        mirna_model_tag,
+    )
+    print(
+        "Map 1 file:",
+        mirna_map_file,
+    )
+
+    mirna_df_raw = prepare_map(
+        mirna_map_file,
+        "mir1395p_t",
+        "miR-139-5p map",
+    )
+
+    mirna_df = align_map_to_order(
+        mirna_df_raw,
+        "mir1395p_t",
+        standard_roi_order,
+        "miR-139-5p map",
+    )
+
+    map_1 = transform_map(
+        mirna_df[
+            "mir1395p_t"
+        ].to_numpy(dtype=float)
+    )
+
+    if np.std(map_1) == 0:
+        raise ValueError(
+            "Map 1 has zero variance for miRNA model "
+            f"{mirna_model_tag}; spatial correlation "
+            "cannot be computed."
+        )
+
+    (
+        null_maps,
+        null_signature,
+        null_file,
+        null_meta_file,
+    ) = generate_or_load_burt_nulls(
+        map_1,
+        standard_roi_order,
+        mirna_model_tag,
+    )
+
+    map_1_null_metadata[
+        mirna_model_tag
+    ] = {
+        "mirna_map_file": str(
+            mirna_map_file
+        ),
+        "burt_null_file": str(
+            null_file
+        ),
+        "burt_null_meta_file": str(
+            null_meta_file
+        ),
+        "burt_null_signature": null_signature,
+    }
+
+    for (
+        srpk1_model_tag,
+        srpk1_map_file,
+    ) in srpk1_maps.items():
+        print("\n------------------------------")
+        print(
+            "Map 1 miRNA model:",
+            mirna_model_tag,
+        )
+        print(
+            "Map 2 SRPK1 model:",
+            srpk1_model_tag,
+        )
+        print(
+            "Map 2 file:",
+            srpk1_map_file,
+        )
+
+        srpk1_df = aligned_srpk1_maps[
+            srpk1_model_tag
+        ]
+
+        df = mirna_df[[
+            roi_col,
+            "atlas_order",
+            "hemisphere",
+            "mir1395p_t",
+        ]].merge(
+            srpk1_df[[
+                roi_col,
+                "atlas_order",
+                "hemisphere",
+                "srpk1_t",
+            ]],
+            on=[
+                roi_col,
+                "atlas_order",
+                "hemisphere",
+            ],
+            how="inner",
+            validate="one_to_one",
+        )
+
+        print(
+            "Aligned merged ROI count:",
+            len(df),
+        )
+        print(
+            "Aligned first ROI:",
+            df[roi_col].iloc[0],
+        )
+        print(
+            "Aligned last LH ROI:",
+            df[roi_col].iloc[
+                expected_n_lh - 1
+            ],
+        )
+        print(
+            "Aligned first RH ROI:",
+            df[roi_col].iloc[
+                expected_n_lh
+            ],
+        )
+        print(
+            "Aligned last ROI:",
+            df[roi_col].iloc[-1],
+        )
+
+        if len(df) != expected_n_roi:
+            raise ValueError(
+                f"Expected {expected_n_roi} ROIs after merge "
+                f"for {mirna_model_tag} x {srpk1_model_tag}, "
+                f"got {len(df)}."
+            )
+
+        df = df.dropna(
+            subset=[
+                "mir1395p_t",
+                "srpk1_t",
+            ]
+        ).copy()
+
+        if len(df) != expected_n_roi:
+            raise ValueError(
+                "ROI count after dropna is not "
+                f"{expected_n_roi} for "
+                f"{mirna_model_tag} x {srpk1_model_tag}."
+            )
+
+        current_map_1 = transform_map(
+            df["mir1395p_t"].to_numpy(
+                dtype=float
+            )
+        )
+        map_2 = transform_map(
+            df["srpk1_t"].to_numpy(
+                dtype=float
+            )
+        )
+
+        if not np.allclose(
+            current_map_1,
+            map_1,
+            equal_nan=False,
+        ):
+            raise ValueError(
+                "Aligned Map 1 vector changed within "
+                f"miRNA model {mirna_model_tag}. "
+                "Check ROI ordering."
+            )
+
+        if np.std(map_2) == 0:
+            raise ValueError(
+                "Map 2 has zero variance for SRPK1 model "
+                f"{srpk1_model_tag}."
+            )
+
+        df["mir1395p_t_used"] = current_map_1
+        df["srpk1_t_used"] = map_2
+
+        comparison_tag = (
+            f"mir1395p_{mirna_model_tag}"
+            f"__srpk1_{srpk1_model_tag}"
+        )
+
+        merged_file = (
+            merged_dir
+            / f"a5_input_merged_{comparison_tag}_v7.csv"
+        )
+        null_corr_file = (
+            null_dist_dir
+            / f"a5_null_distribution_{comparison_tag}_v7.csv"
+        )
+
+        df.to_csv(
+            merged_file,
+            index=False,
+        )
+
+        r_obs, p_burt = stats.compare_images(
+            current_map_1,
+            map_2,
+            nulls=null_maps,
+        )
+        r_naive = np.corrcoef(
+            current_map_1,
+            map_2,
+        )[0, 1]
+
+        null_corrs = np.array(
+            [
+                np.corrcoef(
+                    null_maps[:, i],
+                    map_2,
+                )[0, 1]
+                for i in range(
+                    null_maps.shape[1]
+                )
+            ],
+            dtype=float,
+        )
+
+        if not np.isfinite(
+            null_corrs
+        ).all():
+            raise ValueError(
+                "Null correlation distribution contains "
+                "non-finite values for "
+                f"{mirna_model_tag} x {srpk1_model_tag}."
+            )
+
+        pd.DataFrame({
+            "null_r": null_corrs
+        }).to_csv(
+            null_corr_file,
+            index=False,
+        )
+
+        print(
+            f"Observed r = {r_obs:.6f}"
+        )
+        print(
+            f"Burt-null p = {p_burt:.6f}"
+        )
+
+        all_results.append({
+            "comparison": (
+                "miR1395p_MSN_tmap_vs_"
+                "Peripheral_SRPK1_MSN_tmap"
+            ),
+            "mirna_model_tag": mirna_model_tag,
+            "srpk1_model_tag": srpk1_model_tag,
+            "map_1": (
+                "miR1395p_associated_"
+                "bilateral_cortical_MSN_tmap"
+            ),
+            "map_2": (
+                "Peripheral_SRPK1_associated_"
+                "bilateral_cortical_MSN_tmap"
+            ),
+            "map_1_file": str(
+                mirna_map_file
+            ),
+            "map_2_file": str(
+                srpk1_map_file
+            ),
+            "roi_order_file": str(
+                roi_order_file
+            ),
+            "dk308_parcellation_file": str(
+                DK308_PARCELLATION
+            ),
+            "burt_null_file": str(
+                null_file
+            ),
+            "n_roi": len(df),
+            "n_lh": int(
+                (
+                    df["hemisphere"] == "lh"
+                ).sum()
+            ),
+            "n_rh": int(
+                (
+                    df["hemisphere"] == "rh"
+                ).sum()
+            ),
+            "aligned_first_roi": (
+                df[roi_col].iloc[0]
+            ),
+            "aligned_last_lh_roi": (
+                df[roi_col].iloc[
+                    expected_n_lh - 1
+                ]
+            ),
+            "aligned_first_rh_roi": (
+                df[roi_col].iloc[
+                    expected_n_lh
+                ]
+            ),
+            "aligned_last_roi": (
+                df[roi_col].iloc[-1]
+            ),
+            "use_zscore": use_zscore,
+            "r_obs": r_obs,
+            "r_naive": r_naive,
+            "p_burt": p_burt,
+            "n_perm": null_maps.shape[1],
+            "null_mean": float(
+                np.mean(null_corrs)
+            ),
+            "null_sd": float(
+                np.std(null_corrs)
+            ),
+            "null_min": float(
+                np.min(null_corrs)
+            ),
+            "null_max": float(
+                np.max(null_corrs)
+            ),
+            "merged_file": str(
+                merged_file.relative_to(out_dir)
+            ),
+            "null_corr_file": str(
+                null_corr_file.relative_to(out_dir)
+            ),
+        })
+
+
+# =========================
+# save long-form results and 2 x 4 matrices
+# =========================
+result_df = pd.DataFrame(
+    all_results
+)
+
+expected_n_comparisons = (
+    len(mirna_maps)
+    * len(srpk1_maps)
+)
+
+if len(result_df) != expected_n_comparisons:
+    raise ValueError(
+        f"Expected {expected_n_comparisons} comparisons, "
+        f"got {len(result_df)}."
+    )
+
+result_df.to_csv(
+    result_file,
+    index=False,
+)
+
+r_matrix = result_df.pivot(
+    index="mirna_model_tag",
+    columns="srpk1_model_tag",
+    values="r_obs",
+).reindex(
+    index=list(mirna_maps.keys()),
+    columns=list(srpk1_maps.keys()),
+)
+
+p_matrix = result_df.pivot(
+    index="mirna_model_tag",
+    columns="srpk1_model_tag",
+    values="p_burt",
+).reindex(
+    index=list(mirna_maps.keys()),
+    columns=list(srpk1_maps.keys()),
+)
+
+r_matrix.to_csv(
+    r_matrix_file,
+    index=True,
+)
+p_matrix.to_csv(
+    p_matrix_file,
+    index=True,
+)
+
+
+# =========================
+# metadata
+# =========================
+meta = {
+    "analysis": (
+        "cortical_A5_miR1395p_MSN_tmaps_vs_"
+        "peripheral_SRPK1_MSN_tmaps"
+    ),
+    "analysis_version": "v7",
+    "spatial_domain": "bilateral_cortex",
+    "matrix_dimensions": {
+        "n_mirna_map_1_models": len(
+            mirna_maps
+        ),
+        "n_srpk1_map_2_models": len(
+            srpk1_maps
+        ),
+        "n_total_comparisons": len(
+            result_df
+        ),
+    },
+    "map_1_family": (
+        "miR1395p_associated_"
+        "bilateral_cortical_MSN_tmaps"
+    ),
+    "map_2_family": (
+        "Peripheral_SRPK1_associated_"
+        "bilateral_cortical_MSN_tmaps"
+    ),
+    "mirna_maps": {
+        key: str(value)
+        for key, value in mirna_maps.items()
+    },
+    "srpk1_maps": {
+        key: str(value)
+        for key, value in srpk1_maps.items()
+    },
+    "map_1_null_metadata": (
+        map_1_null_metadata
+    ),
+    "roi_order_file": str(
+        roi_order_file
+    ),
+    "roi_order_check_file": str(
+        roi_order_check_file
+    ),
+    "dk308_parcellation_file": str(
+        DK308_PARCELLATION
+    ),
+    "burt_atlas": burt_atlas,
+    "burt_density": burt_density,
+    "n_perm_requested_per_map_1": n_perm,
+    "seed": seed,
+    "n_proc": n_proc,
+    "expected_n_roi": expected_n_roi,
+    "expected_n_lh": expected_n_lh,
+    "expected_n_rh": expected_n_rh,
+    "use_zscore": use_zscore,
+    "result_file": str(
+        result_file
+    ),
+    "r_matrix_file": str(
+        r_matrix_file
+    ),
+    "p_matrix_file": str(
+        p_matrix_file
+    ),
+    "note": (
+        "Map 1 consists of two miR-139-5p-associated bilateral "
+        "cortical MSN t maps: main and plus_med_history. "
+        "A separate Map 1-specific Burt2020 null set is generated "
+        "for each miRNA model using the 308-label DK-308 "
+        "parcellation in MNI152 2 mm space. Each null set is reused "
+        "across the four peripheral SRPK1 Map 2 models, yielding a "
+        "complete 2 x 4 matrix of eight spatial comparisons. "
+        "The miRNA model tags are main and plus_med_history; "
+        "they are not labeled as batch-adjusted models."
+    ),
+}
+
+with open(
+    meta_file,
+    "w",
+    encoding="utf-8",
+) as f:
+    json.dump(
+        meta,
+        f,
+        indent=2,
+    )
+
+
+print("\n========================================")
+print("All done.")
+print(
+    "Saved long-form result summary to:",
+    result_file,
+)
+print(
+    "Saved observed-r 2 x 4 matrix to:",
+    r_matrix_file,
+)
+print(
+    "Saved Burt-p 2 x 4 matrix to:",
+    p_matrix_file,
+)
+print(
+    "Saved analysis metadata to:",
+    meta_file,
+)
+print(
+    "Saved ROI order check to:",
+    roi_order_check_file,
+)
+print(result_df)

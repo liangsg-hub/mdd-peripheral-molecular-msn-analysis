@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Left-hemisphere subcortical spatial correspondence between peripheral SRPK1-associated and miR-139-5p-associated MSN maps using BrainSMASH nulls."""
+"""Left-hemisphere subcortical spatial correspondence between miR-139-5p-associated and peripheral SRPK1-associated MSN maps using BrainSMASH nulls."""
 import warnings
 import os
 warnings.filterwarnings("ignore")
@@ -19,7 +19,7 @@ from brainsmash.mapgen.base import Base
 #   export MSN_PROJECT_ROOT=/path/to/msn_2026
 # Optional: set TIAN_S4_DISTANCE_MATRIX if the distance matrix is stored elsewhere.
 # Optional: set MSN_OUTPUT_ROOT to redirect generated outputs.
-PROJECT_ROOT = Path(os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_2026")).expanduser()
+PROJECT_ROOT = Path(os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_project")).expanduser()
 OUTPUT_ROOT = Path(os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")).expanduser()
 TIAN_S4_DISTANCE_MATRIX = Path(
     os.environ.get("TIAN_S4_DISTANCE_MATRIX", PROJECT_ROOT / "tian_s4_distance_matrix.csv")
@@ -27,9 +27,11 @@ TIAN_S4_DISTANCE_MATRIX = Path(
 
 
 # =========================
-# matched x/y maps
-# x = left-hemisphere SRPK1-associated subcortical MSN map
-# y = left-hemisphere miR-139-5p-associated subcortical MSN map
+# 2 x 4 x/y map matrix
+# x = left-hemisphere miR-139-5p-associated subcortical MSN map
+#     (Map 1; BrainSMASH null source)
+# y = left-hemisphere peripheral SRPK1-associated subcortical MSN map
+#     (Map 2)
 #
 # Tian S4 subcortical atlas has 54 ROIs in total:
 #   first 27 ROIs  = right hemisphere
@@ -38,44 +40,42 @@ TIAN_S4_DISTANCE_MATRIX = Path(
 srpk1_dir = PROJECT_ROOT / "msn_results_subcort" / "srpk1_msn_subcort_assoc_v2"
 mir_dir = PROJECT_ROOT / "msn_results_subcort" / "mir1395p_msn_subcort_assoc"
 
-matched_files = {
-    "srpk1_batch_main_vs_mir1395p_main": {
-        "srpk1_model_tag": "batch_main",
-        "mirna_model_tag": "batch_main",
-        "x_file": srpk1_dir / "srpk1_imaging_map_main.csv",
-        "y_file": mir_dir / "mir1395p_imaging_map_main.csv",
-    },
-    "srpk1_batch_plus_med_history_vs_mir1395p_plus_med_history": {
-        "srpk1_model_tag": "batch_plus_med_history",
-        "mirna_model_tag": "batch_plus_med_history",
-        "x_file": srpk1_dir / "srpk1_imaging_map_plus_med_history.csv",
-        "y_file": mir_dir / "mir1395p_imaging_map_plus_med_history.csv",
-    },
-    "srpk1_plus_neutrophils_vs_mir1395p_main": {
-        "srpk1_model_tag": "batch_plus_neutrophils",
-        "mirna_model_tag": "batch_main",
-        "x_file": srpk1_dir / "srpk1_imaging_map_plus_neutrophils.csv",
-        "y_file": mir_dir / "mir1395p_imaging_map_main.csv",
-    },
-    "srpk1_plus_med_history_neutrophils_vs_mir1395p_plus_med_history": {
-        "srpk1_model_tag": "batch_plus_med_history_neutrophils",
-        "mirna_model_tag": "batch_plus_med_history",
-        "x_file": srpk1_dir / "srpk1_imaging_map_plus_med_history_neutrophils.csv",
-        "y_file": mir_dir / "mir1395p_imaging_map_plus_med_history.csv",
-    },
+# miR-139-5p maps do not include RNA-seq Batch. Each of the two
+# miR-139-5p models is compared with all four SRPK1 models.
+mirna_models = {
+    "main": mir_dir / "mir1395p_imaging_map_main.csv",
+    "plus_med_history": mir_dir / "mir1395p_imaging_map_plus_med_history.csv",
 }
+
+srpk1_models = {
+    "batch_main": srpk1_dir / "srpk1_imaging_map_main.csv",
+    "batch_plus_med_history": srpk1_dir / "srpk1_imaging_map_plus_med_history.csv",
+    "batch_plus_neutrophils": srpk1_dir / "srpk1_imaging_map_plus_neutrophils.csv",
+    "batch_plus_med_history_neutrophils": srpk1_dir / "srpk1_imaging_map_plus_med_history_neutrophils.csv",
+}
+
+matched_files = {}
+for mirna_model_tag, x_file in mirna_models.items():
+    for srpk1_model_tag, y_file in srpk1_models.items():
+        model_name = f"mir1395p_{mirna_model_tag}_vs_srpk1_{srpk1_model_tag}"
+        matched_files[model_name] = {
+            "mirna_model_tag": mirna_model_tag,
+            "srpk1_model_tag": srpk1_model_tag,
+            "x_file": x_file,
+            "y_file": y_file,
+        }
 
 dist_file = TIAN_S4_DISTANCE_MATRIX
 
 # =========================
 # Output paths
 # =========================
-out_dir = OUTPUT_ROOT / "a5_sub_srpk1_vs_mir1395p_lh_v2"
+out_dir = OUTPUT_ROOT / "a5_sub_mir1395p_vs_srpk1_2x4_lh_v3"
 out_dir.mkdir(parents=True, exist_ok=True)
 
-result_file = out_dir / "a5_sub_srpk1_vs_mir1395p_lh_results_v2.csv"
-meta_file = out_dir / "a5_sub_srpk1_vs_mir1395p_lh_meta_v2.json"
-roi_order_check_file = out_dir / "a5_tian_s4_lh_roi_order_check_v2.csv"
+result_file = out_dir / "a5_sub_mir1395p_vs_srpk1_2x4_lh_results_v3.csv"
+meta_file = out_dir / "a5_sub_mir1395p_vs_srpk1_2x4_lh_meta_v3.json"
+roi_order_check_file = out_dir / "a5_tian_s4_lh_roi_order_check_v3.csv"
 
 merged_dir = out_dir / "input_merged"
 vectors_dir = out_dir / "ordered_vectors"
@@ -239,7 +239,7 @@ if D_lh.shape != (expected_hemi_n_roi, expected_hemi_n_roi):
 # =========================
 all_results = []
 meta = {
-    "analysis": "subcortical_A5_SRPK1_MSN_tmap_vs_miR1395p_MSN_tmap_LH",
+    "analysis": "subcortical_A5_miR1395p_MSN_tmap_vs_SRPK1_MSN_tmap_LH_2x4",
     "n_perm_requested": n_perm,
     "seed": seed,
     "dist_file": str(dist_file),
@@ -251,14 +251,15 @@ meta = {
     "roi_selection": "last 27 ROIs of Tian S4 distance matrix are treated as left hemisphere",
     "rh_order": rh_order,
     "lh_order": lh_order,
-    "x_map_family": "Peripheral_SRPK1_subcortical_MSN_tmap_LH",
-    "y_map_family": "miR1395p_subcortical_MSN_tmap_LH",
-    "primary_x_model": "batch_main: MSN ~ SRPK1 + Batch + age + sex + EDL + eTIV",
-    "analysis_version": "v2",
+    "x_map_family": "miR1395p_subcortical_MSN_tmap_LH",
+    "y_map_family": "Peripheral_SRPK1_subcortical_MSN_tmap_LH",
+    "primary_x_model": "main: MSN ~ miR-139-5p + age + sex + EDL + eTIV",
+    "analysis_version": "v3",
     "note": (
-        "This LH subcortical A5 analysis includes primary, medication-adjusted, "
-        "neutrophil-adjusted, and medication-plus-neutrophil-adjusted SRPK1 models. "
-        "The miR-139-5p side uses the matched primary or medication-adjusted map."
+        "Version 3 uses left-subcortical miR-139-5p-associated MSN t-maps as Map 1 "
+        "and peripheral SRPK1-associated MSN t-maps as Map 2, and evaluates the "
+        "complete 2 x 4 model matrix. BrainSMASH nulls are generated separately "
+        "for the two miR-139-5p Map 1 models and reused across the four SRPK1 Map 2 models."
     ),
     "matched_files": {},
     "output_subdirectories": {
@@ -275,36 +276,36 @@ for model_name, paths in matched_files.items():
 
     x_file = paths["x_file"]
     y_file = paths["y_file"]
-    srpk1_model_tag = paths["srpk1_model_tag"]
     mirna_model_tag = paths["mirna_model_tag"]
+    srpk1_model_tag = paths["srpk1_model_tag"]
 
     print("x_file:", x_file)
     print("y_file:", y_file)
 
     x_df_raw = prepare_map(
         x_file,
-        value_name="srpk1_t",
-        file_label=f"SRPK1 map {model_name}",
+        value_name="mir1395p_t",
+        file_label=f"miR-139-5p map {model_name}",
         keep_extra=["beta", "p", "p_fdr", "N", "se"],
     )
     y_df_raw = prepare_map(
         y_file,
-        value_name="mir1395p_t",
-        file_label=f"miR-139-5p map {model_name}",
+        value_name="srpk1_t",
+        file_label=f"SRPK1 map {model_name}",
         keep_extra=["beta", "p", "p_fdr", "N", "se"],
     )
 
     x_df = subset_and_order_map(
         x_df_raw,
-        value_name="srpk1_t",
-        target_order=target_order,
-        file_label=f"SRPK1 map {model_name}",
-    )
-    y_df = subset_and_order_map(
-        y_df_raw,
         value_name="mir1395p_t",
         target_order=target_order,
         file_label=f"miR-139-5p map {model_name}",
+    )
+    y_df = subset_and_order_map(
+        y_df_raw,
+        value_name="srpk1_t",
+        target_order=target_order,
+        file_label=f"SRPK1 map {model_name}",
     )
 
     df = x_df.merge(
@@ -312,9 +313,9 @@ for model_name, paths in matched_files.items():
         on="ROI",
         how="inner",
         validate="one_to_one",
-        suffixes=("_srpk1", "_mir1395p"),
+        suffixes=("_mir1395p", "_srpk1"),
     )
-    df = df.dropna(subset=["srpk1_t", "mir1395p_t"]).copy()
+    df = df.dropna(subset=["mir1395p_t", "srpk1_t"]).copy()
 
     print("Merged LH ROI count:", len(df))
     print(df.head())
@@ -332,25 +333,27 @@ for model_name, paths in matched_files.items():
     if roi_order != target_order:
         raise ValueError("Merged ROI order does not match LH target order.")
 
-    x = df["srpk1_t"].to_numpy(dtype=float)
-    y = df["mir1395p_t"].to_numpy(dtype=float)
+    x = df["mir1395p_t"].to_numpy(dtype=float)
+    y = df["srpk1_t"].to_numpy(dtype=float)
 
-    merged_file = merged_dir / f"a5_sub_input_merged_lh_{model_name}_v2.csv"
-    vectors_file = vectors_dir / f"a5_sub_ordered_vectors_lh_{model_name}_v2.csv"
-    null_corr_file = null_dist_dir / f"a5_sub_null_distribution_lh_{model_name}_v2.csv"
-    null_file = nulls_dir / f"a5_sub_nulls_x_srpk1_lh_{model_name}_v2.npy"
+    merged_file = merged_dir / f"a5_sub_input_merged_lh_{model_name}_v3.csv"
+    vectors_file = vectors_dir / f"a5_sub_ordered_vectors_lh_{model_name}_v3.csv"
+    null_corr_file = null_dist_dir / f"a5_sub_null_distribution_lh_{model_name}_v3.csv"
+    null_file = nulls_dir / f"a5_sub_nulls_x_mir1395p_lh_{mirna_model_tag}_v3.npy"
 
     df.to_csv(merged_file, index=False)
 
     pd.DataFrame({
         "ROI": roi_order,
-        "srpk1_t": x,
-        "mir1395p_t": y,
+        "mir1395p_t": x,
+        "srpk1_t": y,
     }).to_csv(vectors_file, index=False)
 
     r_obs, p_naive = pearsonr(x, y)
     rho_obs, p_spear = spearmanr(x, y)
 
+    # Nulls are generated from Map 1 = miR-139-5p and shared across
+    # the four SRPK1 Map 2 models for the same miRNA model.
     surrogates = make_nulls_for_x(
         x=x,
         D=D_lh,
@@ -373,7 +376,7 @@ for model_name, paths in matched_files.items():
     print(f"Spatial-null p = {p_spatial:.6f}")
 
     all_results.append({
-        "comparison": f"periph_SRPK1_subcort_MSN_tmap_LH_vs_miR1395p_subcort_MSN_tmap_LH_{model_name}",
+        "comparison": f"miR1395p_subcort_MSN_tmap_LH_vs_periph_SRPK1_subcort_MSN_tmap_LH_{model_name}",
         "model": model_name,
         "srpk1_model_tag": srpk1_model_tag,
         "mirna_model_tag": mirna_model_tag,

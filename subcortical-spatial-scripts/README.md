@@ -55,8 +55,8 @@ If `MSN_OUTPUT_ROOT` is not set, outputs are written under `$MSN_PROJECT_ROOT/ms
 | `6_a2_srpk1_map_disorder_map_lh_v2.py` | Left-hemisphere MDD-HC subcortical MSN map vs peripheral SRPK1-associated subcortical MSN maps |
 | `6_a3_ahba_map_disorder_map_v2.py` | Left-hemisphere AHBA-derived SRPK1 expression vs MDD-HC subcortical MSN map |
 | `6_a4_ahba_srpk1_expr_peri_map_v5.py` | Left-hemisphere AHBA-derived SRPK1 expression vs peripheral SRPK1-associated subcortical MSN maps |
-| `6_a5_srpk1_map_mirna_map_v3.py` | Bilateral peripheral SRPK1-associated vs miR-139-5p-associated subcortical MSN maps |
-| `6_a5_srpk1_map_mirna_map_lh_v2.py` | Left-hemisphere peripheral SRPK1-associated vs miR-139-5p-associated subcortical MSN maps |
+| `6_a5_srpk1_map_mirna_map_v4.py` | Bilateral peripheral SRPK1-associated vs miR-139-5p-associated subcortical MSN maps |
+| `6_a5_srpk1_map_mirna_map_lh_v3.py` | Left-hemisphere peripheral SRPK1-associated vs miR-139-5p-associated subcortical MSN maps |
 
 ## Installation
 

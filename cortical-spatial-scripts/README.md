@@ -5,14 +5,14 @@ The scripts compare molecular-associated MSN maps, MDD-related MSN maps, and AHB
 
 ## Scripts
 
-- `5_a1_mirna_map_disorder_map_v3.py`: bilateral miR-139-5p-associated MSN map versus MDD-related MSN map.
-- `5_a1_mirna_map_disorder_map_lh_v1.py`: left-hemisphere miR-139-5p-associated MSN map versus MDD-related MSN map.
-- `5_a2_srpk1_map_disorder_map_v5.py`: bilateral SRPK1-associated MSN map versus MDD-related MSN map.
-- `5_a2_srpk1_map_disorder_map_lh_v1.py`: left-hemisphere SRPK1-associated MSN map versus MDD-related MSN map.
-- `5_a3_ahba_map_disorder_map_v3.py`: AHBA-derived SRPK1 expression map versus MDD-related MSN map.
-- `5_a4_ahba_map_periph_srpk1_msn_v5.py`: AHBA-derived SRPK1 expression map versus peripheral SRPK1-associated MSN maps.
-- `5_a5_srpk1_map_mirna_map_v6.py`: bilateral SRPK1-associated MSN maps versus miR-139-5p-associated MSN maps.
-- `5_a5_srpk1_map_mirna_map_lh_v2.py`: left-hemisphere SRPK1-associated MSN maps versus miR-139-5p-associated MSN maps.
+- `5_a1_mirna_map_disorder_map_v4.py`: bilateral miR-139-5p-associated MSN map versus MDD-related MSN map.
+- `5_a1_mirna_map_disorder_map_lh_v2.py`: left-hemisphere miR-139-5p-associated MSN map versus MDD-related MSN map.
+- `5_a2_srpk1_map_disorder_map_v6.py`: bilateral SRPK1-associated MSN map versus MDD-related MSN map.
+- `5_a2_srpk1_map_disorder_map_lh_v2.py`: left-hemisphere SRPK1-associated MSN map versus MDD-related MSN map.
+- `5_a3_ahba_map_disorder_map_v4.py`: AHBA-derived SRPK1 expression map versus MDD-related MSN map.
+- `5_a4_ahba_map_periph_srpk1_msn_v6.py`: AHBA-derived SRPK1 expression map versus peripheral SRPK1-associated MSN maps.
+- `5_a5_srpk1_map_mirna_map_v7.py`: bilateral SRPK1-associated MSN maps versus miR-139-5p-associated MSN maps.
+- `5_a5_srpk1_map_mirna_map_lh_v3.py`: left-hemisphere SRPK1-associated MSN maps versus miR-139-5p-associated MSN maps.
 
 ## Configuration
 
@@ -21,19 +21,19 @@ Before running a script, set `MSN_PROJECT_ROOT` to the directory that contains t
 
 ```bash
 export MSN_PROJECT_ROOT=/path/to/msn_2026
-python 5_a1_mirna_map_disorder_map_v3.py
+python 5_a1_mirna_map_disorder_map_v4.py
 ```
 
 On Windows PowerShell:
 
 ```powershell
 $env:MSN_PROJECT_ROOT = "D:/path/to/msn_2026"
-python 5_a1_mirna_map_disorder_map_v3.py
+python 5_a1_mirna_map_disorder_map_v4.py
 ```
 
 ## Required Python packages
 
-See `requirements.txt`. The scripts assume that precomputed DK-308 Burt null maps and ROI-order files are already available under `MSN_PROJECT_ROOT`.
+See `requirements.txt`. The scripts generate Map 1-specific Burt2020 null maps dynamically (cached in the output directory) and require the DK-308 parcellation and ROI-order files under `MSN_PROJECT_ROOT`. Set `DK308_PARCELLATION` (or `DK308_LH_PARCELLATION` for left-hemisphere scripts) if the parcellation file is stored elsewhere.
 
 ## Notes
 

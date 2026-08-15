@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Left-hemisphere subcortical spatial correspondence between the MDD-HC MSN disorder map and miR-139-5p-associated MSN maps using BrainSMASH nulls."""
 import warnings
-import os
 warnings.filterwarnings("ignore")
 
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -12,32 +12,33 @@ from scipy.stats import pearsonr, spearmanr
 from brainsmash.mapgen.base import Base
 
 # =========================
-# Portable project paths
+# user configuration
 # =========================
-# Set MSN_PROJECT_ROOT to the folder that contains the input data.
-# Example:
-#   export MSN_PROJECT_ROOT=/path/to/msn_2026
-# Optional: set TIAN_S4_DISTANCE_MATRIX if the distance matrix is stored elsewhere.
-# Optional: set MSN_OUTPUT_ROOT to redirect generated outputs.
-PROJECT_ROOT = Path(os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_2026")).expanduser()
-OUTPUT_ROOT = Path(os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")).expanduser()
-TIAN_S4_DISTANCE_MATRIX = Path(
-    os.environ.get("TIAN_S4_DISTANCE_MATRIX", PROJECT_ROOT / "tian_s4_distance_matrix.csv")
+PROJECT_ROOT = Path(
+    os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_project")
 ).expanduser()
-
+OUTPUT_ROOT = Path(
+    os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")
+).expanduser()
+TIAN_S4_DISTANCE_MATRIX = Path(
+    os.environ.get(
+        "TIAN_S4_DISTANCE_MATRIX",
+        PROJECT_ROOT / "tian_s4_distance_matrix.csv",
+    )
+).expanduser()
 
 # =========================
 # fixed x map and distance matrix
 # x = left hemisphere disease map
 # =========================
-disease_file = PROJECT_ROOT / "msn_results_subcort" / "tmap_mdd_vs_hc_covs_subcort.csv"
+disease_file = OUTPUT_ROOT / "tmap_mdd_vs_hc_covs_subcort.csv"
 dist_file = TIAN_S4_DISTANCE_MATRIX
 
 # =========================
 # y maps to test
 # y = left hemisphere miR-139-5p subcortical maps
 # =========================
-img_dir = PROJECT_ROOT / "msn_results_subcort" / "mir1395p_msn_subcort_assoc"
+img_dir = OUTPUT_ROOT / "mir1395p_msn_subcort_assoc"
 
 img_files = {
     "main": img_dir / "mir1395p_imaging_map_main.csv",
@@ -45,7 +46,7 @@ img_files = {
 }
 
 # =========================
-# Output paths
+# output
 # =========================
 out_dir = OUTPUT_ROOT / "a1_sub_disease_vs_mir1395p_lh"
 out_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +63,7 @@ for d in [merged_dir, vectors_dir, null_dist_dir]:
     d.mkdir(parents=True, exist_ok=True)
 
 # =========================
-# Analysis settings
+# settings
 # =========================
 n_perm = 10000
 seed = 1234
@@ -76,7 +77,7 @@ expected_n_rh = 27
 # last 27 ROIs are left hemisphere
 
 # =========================
-# Helper functions
+# helpers
 # =========================
 def check_file(path, label):
     if not path.exists():

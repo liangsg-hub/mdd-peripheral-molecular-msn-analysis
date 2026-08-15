@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Left-hemisphere subcortical spatial correspondence between the MDD-HC MSN disorder map and peripheral SRPK1-associated MSN maps using BrainSMASH nulls."""
 import warnings
-import os
 warnings.filterwarnings("ignore")
 
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -12,25 +12,26 @@ from scipy.stats import pearsonr, spearmanr
 from brainsmash.mapgen.base import Base
 
 # =========================
-# Portable project paths
+# user configuration
 # =========================
-# Set MSN_PROJECT_ROOT to the folder that contains the input data.
-# Example:
-#   export MSN_PROJECT_ROOT=/path/to/msn_2026
-# Optional: set TIAN_S4_DISTANCE_MATRIX if the distance matrix is stored elsewhere.
-# Optional: set MSN_OUTPUT_ROOT to redirect generated outputs.
-PROJECT_ROOT = Path(os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_2026")).expanduser()
-OUTPUT_ROOT = Path(os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")).expanduser()
-TIAN_S4_DISTANCE_MATRIX = Path(
-    os.environ.get("TIAN_S4_DISTANCE_MATRIX", PROJECT_ROOT / "tian_s4_distance_matrix.csv")
+PROJECT_ROOT = Path(
+    os.environ.get("MSN_PROJECT_ROOT", "/path/to/msn_project")
 ).expanduser()
-
+OUTPUT_ROOT = Path(
+    os.environ.get("MSN_OUTPUT_ROOT", PROJECT_ROOT / "msn_results_subcort")
+).expanduser()
+TIAN_S4_DISTANCE_MATRIX = Path(
+    os.environ.get(
+        "TIAN_S4_DISTANCE_MATRIX",
+        PROJECT_ROOT / "tian_s4_distance_matrix.csv",
+    )
+).expanduser()
 
 # =========================
 # fixed x map and distance matrix
 # x = left hemisphere disease map
 # =========================
-disease_file = PROJECT_ROOT / "msn_results_subcort" / "tmap_mdd_vs_hc_covs_subcort.csv"
+disease_file = OUTPUT_ROOT / "tmap_mdd_vs_hc_covs_subcort.csv"
 dist_file = TIAN_S4_DISTANCE_MATRIX
 
 # =========================
@@ -42,7 +43,7 @@ dist_file = TIAN_S4_DISTANCE_MATRIX
 #   MSN ~ SRPK1 + Batch + age + sex + EDL + eTIV
 # The remaining maps are sensitivity models that also retain Batch.
 # =========================
-img_dir = PROJECT_ROOT / "msn_results_subcort" / "srpk1_msn_subcort_assoc_v2"
+img_dir = OUTPUT_ROOT / "srpk1_msn_subcort_assoc_v2"
 
 img_files = {
     "batch_main": img_dir / "srpk1_imaging_map_main.csv",
@@ -52,7 +53,7 @@ img_files = {
 }
 
 # =========================
-# Output paths
+# output
 # =========================
 out_dir = OUTPUT_ROOT / "a2_sub_disease_vs_srpk1_lh"
 out_dir.mkdir(parents=True, exist_ok=True)
@@ -69,7 +70,7 @@ for d in [merged_dir, vectors_dir, null_dist_dir]:
     d.mkdir(parents=True, exist_ok=True)
 
 # =========================
-# Analysis settings
+# settings
 # =========================
 n_perm = 10000
 seed = 1234
@@ -78,7 +79,7 @@ expected_hemi_n_roi = 27
 hemisphere = "left"
 
 # =========================
-# Helper functions
+# helpers
 # =========================
 def require_columns(df, cols, file_label):
     missing = [c for c in cols if c not in df.columns]
